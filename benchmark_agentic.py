@@ -3,16 +3,18 @@
 Unified multi-agent benchmark CLI.
 
 Supports multiple framework runners via --framework flag:
-  - raw:     Hardcoded diamond DAG (P → E0∥E1 → A), baseline (httpx direct)
-  - autogen: SelectorGroupChat with dynamic LLM speaker selection
+  - autogen (default): SelectorGroupChat with dynamic LLM speaker selection
+  - raw:               Hardcoded diamond DAG (P → E0∥E1 → A), baseline
+  - langgraph:         LangGraph StateGraph workflow (TODO)
+  - a2a:               Google A2A protocol (TODO)
 
 Example:
-  python benchmark_agentic.py --framework raw \
+  python benchmark_agentic.py \
     --model Qwen/Qwen3-Next-80B-A3B-Instruct \
     --dataset_path /path/to/sharegpt.json \
     --tasks 64 --concurrency 32 --executors 2
 
-  python benchmark_agentic.py --framework autogen \
+  python benchmark_agentic.py --framework raw \
     --model Qwen/Qwen3-Next-80B-A3B-Instruct \
     --dataset_path /path/to/sharegpt.json \
     --tasks 3 --concurrency 1
@@ -34,7 +36,7 @@ from benchmark.core.streaming_client import OpenAIStreamingClient
 from benchmark.core.trace_writer import write_trace_jsonl
 from benchmark.core.types import TaskRecord
 from benchmark.runners.base import RunContext
-from benchmark.runners.registry import available_frameworks, get_runner
+from benchmark.runners.registry import available_frameworks, default_framework, get_runner
 
 
 def print_summary(records: List[TaskRecord], total_s: float) -> None:
@@ -105,9 +107,10 @@ def print_summary(records: List[TaskRecord], total_s: float) -> None:
 
 async def main():
     ap = argparse.ArgumentParser(description="Multi-framework agentic benchmark")
-    ap.add_argument("--framework", type=str, default="raw",
+    default_fw = default_framework()
+    ap.add_argument("--framework", type=str, default=default_fw,
                     choices=available_frameworks(),
-                    help=f"Runner framework ({', '.join(available_frameworks())})")
+                    help=f"Runner framework (default: {default_fw})")
     ap.add_argument("--model", type=str, required=True)
     ap.add_argument("--dataset_path", type=str, required=True,
                     help="REQUIRED: ShareGPT/ShareGPT4V JSON")

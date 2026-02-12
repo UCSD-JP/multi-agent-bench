@@ -3,7 +3,7 @@
 # GPU server runs vLLM separately; this config is for the benchmark client only.
 
 # Benchmark framework: "raw" (hardcoded diamond DAG) or "autogen" (SelectorGroupChat)
-export BENCH_FRAMEWORK="${BENCH_FRAMEWORK:-raw}"
+export BENCH_FRAMEWORK="${BENCH_FRAMEWORK:-autogen}"
 
 # Model served on GPU server
 export MODEL="${MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}"
