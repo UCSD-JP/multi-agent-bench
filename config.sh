@@ -5,11 +5,11 @@
 # Benchmark framework: "autogen" | "langgraph" | "a2a"
 export BENCH_FRAMEWORK="${BENCH_FRAMEWORK:-autogen}"
 
-# Model served on GPU server
-export MODEL="${MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}"
+# Model served on GPU server (FP8 for single H100 80GB)
+export MODEL="${MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct-FP8}"
 
 # GPU server connection
-# wolverine (TP1 single GPU):
+# wolverine (TP1 single H100 80GB):
 export SERVER_IP="${SERVER_IP:-wolverine.ucsd.edu}"
 # paladin (TP2 multi-GPU):
 # export SERVER_IP="${SERVER_IP:-paladin.ucsd.edu}"
