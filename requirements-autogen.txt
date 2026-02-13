@@ -1,4 +1,0 @@
-# AutoGen runner (default)
--r requirements.txt
-autogen-agentchat>=0.4.0
-autogen-ext[openai]>=0.4.0

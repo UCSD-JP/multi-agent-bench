@@ -1,3 +1,4 @@
-# Google A2A (Agent-to-Agent) runner
+# Google A2A runner (additional)
 -r requirements.txt
 a2a-sdk>=0.2.0
+uvicorn>=0.30.0
