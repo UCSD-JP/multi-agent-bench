@@ -4,9 +4,8 @@ Unified multi-agent benchmark CLI.
 
 Supports multiple framework runners via --framework flag:
   - autogen (default): SelectorGroupChat with dynamic LLM speaker selection
-  - raw:               Hardcoded diamond DAG (P → E0∥E1 → A), baseline
-  - langgraph:         LangGraph StateGraph workflow (TODO)
-  - a2a:               Google A2A protocol (TODO)
+  - langgraph:         LangGraph StateGraph with fan-out parallel executors
+  - a2a:               Google A2A protocol with parallel agent tasks
 
 Example:
   python benchmark_agentic.py \
@@ -14,7 +13,7 @@ Example:
     --dataset_path /path/to/sharegpt.json \
     --tasks 64 --concurrency 32 --executors 2
 
-  python benchmark_agentic.py --framework raw \
+  python benchmark_agentic.py --framework langgraph \
     --model Qwen/Qwen3-Next-80B-A3B-Instruct \
     --dataset_path /path/to/sharegpt.json \
     --tasks 3 --concurrency 1

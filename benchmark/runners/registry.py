@@ -3,12 +3,10 @@
 from typing import Dict, List, Type
 
 from .base import WorkflowRunner
-from .raw_runner import RawRunner
 
 _RUNNERS: Dict[str, Type[WorkflowRunner]] = {}
 
-# Default framework (autogen if installed, else raw)
-DEFAULT_FRAMEWORK = "raw"
+DEFAULT_FRAMEWORK = "autogen"
 
 
 def register(name: str, cls: Type[WorkflowRunner]) -> None:
@@ -33,16 +31,12 @@ def default_framework() -> str:
     return DEFAULT_FRAMEWORK
 
 
-# === Built-in (always available) ===
-register("raw", RawRunner)
-
 # === Lazy registration: skip if not installed ===
 
-# AutoGen (default when installed)
+# AutoGen (default)
 try:
     from benchmark.autogen_ext.runner import AutoGenRunner
     register("autogen", AutoGenRunner)
-    DEFAULT_FRAMEWORK = "autogen"
 except ImportError:
     pass
 

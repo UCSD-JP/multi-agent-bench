@@ -2,14 +2,17 @@
 # Multi-Agent Bench — client-side configuration
 # GPU server runs vLLM separately; this config is for the benchmark client only.
 
-# Benchmark framework: "raw" (hardcoded diamond DAG) or "autogen" (SelectorGroupChat)
+# Benchmark framework: "autogen" | "langgraph" | "a2a"
 export BENCH_FRAMEWORK="${BENCH_FRAMEWORK:-autogen}"
 
 # Model served on GPU server
 export MODEL="${MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}"
 
 # GPU server connection
-export SERVER_IP="${SERVER_IP:-paladin.ucsd.edu}"
+# wolverine (TP1 single GPU):
+export SERVER_IP="${SERVER_IP:-wolverine.ucsd.edu}"
+# paladin (TP2 multi-GPU):
+# export SERVER_IP="${SERVER_IP:-paladin.ucsd.edu}"
 export SERVER_PORT="${SERVER_PORT:-8000}"
 export BASE_URL="${BASE_URL:-http://${SERVER_IP}:${SERVER_PORT}/v1}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-EMPTY}"
