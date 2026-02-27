@@ -16,9 +16,16 @@ import operator
 import time
 from typing import Annotated, Any, Dict, List, Optional
 
+from benchmark.core.dag_metrics import compute_dag_metrics, compute_role_token_stats
 from benchmark.core.metrics import critical_path_dag_ms
 from benchmark.core.prompts import PromptBuilder
-from benchmark.core.types import LLMCallMetrics, StepRecord, TaskRecord
+from benchmark.core.types import (
+    DagMetrics,
+    LLMCallMetrics,
+    RoleTokenStats,
+    StepRecord,
+    TaskRecord,
+)
 from benchmark.runners.base import RunContext, WorkflowRunner
 
 try:
@@ -93,6 +100,21 @@ class LangGraphRunner(WorkflowRunner):
         deps_map = {sid: r.deps for sid, r in steps.items()}
         cp_ms = critical_path_dag_ms(step_durations, deps_map) if steps else 0.0
 
+        # v2: compute DAG metrics and role token stats
+        steps_raw = {
+            sid: {
+                "deps": r.deps,
+                "agent_role": r.agent_role,
+                "prompt_tokens": r.prompt_tokens,
+                "completion_tokens": r.completion_tokens,
+            }
+            for sid, r in steps.items()
+        }
+        dag_raw = compute_dag_metrics(steps_raw)
+        dag_metrics = DagMetrics(**dag_raw)
+        role_stats_raw = compute_role_token_stats(steps_raw)
+        role_token_stats = [RoleTokenStats(**rs) for rs in role_stats_raw]
+
         return TaskRecord(
             task_id=task_id,
             task_start_ts=task_start,
@@ -105,6 +127,9 @@ class LangGraphRunner(WorkflowRunner):
             critical_path_ms=cp_ms,
             total_idle_wait_ms=total_idle_wait_ms,
             framework="langgraph",
+            schema_version=2,
+            dag_metrics=dag_metrics,
+            role_token_stats=role_token_stats,
         )
 
     def _build_graph(self, context: RunContext) -> "StateGraph":
@@ -210,6 +235,7 @@ class LangGraphRunner(WorkflowRunner):
                 model=context.model,
                 messages=messages,
                 temperature=context.temperature,
+                max_model_len=context.max_model_len,
             )
             end_ts = call.end_ts
 
@@ -233,6 +259,11 @@ class LangGraphRunner(WorkflowRunner):
             "bytes_out": bytes_out,
             "ok": call.ok,
             "error": call.error,
+            # v2: monotonic ns timestamps
+            "start_ns": call.start_ns,
+            "first_token_ns": call.first_token_ns,
+            "end_ns": call.end_ns,
+            "status": "error" if not call.ok else "ok",
         }
 
         return {"out_text": call.out_text, "step_record": step_record}

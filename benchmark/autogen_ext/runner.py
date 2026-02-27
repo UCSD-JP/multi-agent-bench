@@ -1,45 +1,38 @@
 """
-AutoGenRunner — SelectorGroupChat-based multi-agent workflow.
+AutoGenRunner — orchestrated multi-agent workflow using AutoGen agents.
 
-Uses AutoGen's SelectorGroupChat where an LLM dynamically selects the next
-speaker, contrasting with the raw runner's hardcoded diamond DAG.
+Uses AutoGen's AssistantAgent with InstrumentedModelClient for TTFT/TPOT
+measurement.  Agents are called sequentially via on_messages() in a fixed
+P → E0 → E1 → ... → A order.  This avoids SelectorGroupChat's internal
+selector-retry infinite loops while preserving AutoGen's agent abstraction
+and model client protocol.
 """
 
+import asyncio
+import re
 import time
 from typing import Dict, List
 
+from benchmark.core.dag_metrics import compute_dag_metrics, compute_role_token_stats
 from benchmark.core.metrics import critical_path_dag_ms
-from benchmark.core.types import LLMCallMetrics, StepRecord, TaskRecord
+from benchmark.core.types import (
+    DagMetrics,
+    LLMCallMetrics,
+    RoleTokenStats,
+    StepRecord,
+    TaskRecord,
+)
 from benchmark.runners.base import RunContext, WorkflowRunner
 
 from .instrumented_client import InstrumentedModelClient
 
 try:
     from autogen_agentchat.agents import AssistantAgent
-    from autogen_agentchat.conditions import (
-        MaxMessageTermination,
-        TextMentionTermination,
-    )
-    from autogen_agentchat.teams import SelectorGroupChat
+    from autogen_agentchat.messages import TextMessage
 
     _AUTOGEN_AVAILABLE = True
 except ImportError:
     _AUTOGEN_AVAILABLE = False
-
-
-# Selector prompt template that guides LLM speaker selection
-_SELECTOR_PROMPT = """\
-You are managing a team of agents to complete a user task.
-The agents are:
-- Planner: Creates a plan with numbered steps. Should speak FIRST.
-- Executor0: Executes part of the plan. Should speak AFTER the Planner.
-- Executor1: Executes another part of the plan. Should speak AFTER the Planner.
-- Aggregator: Combines all outputs into a final answer. Should speak LAST after all Executors.
-
-Given the conversation so far, select the next agent to speak.
-Only return the agent name (Planner, Executor0, Executor1, or Aggregator).
-When the Aggregator has produced the final answer, the task is complete.
-"""
 
 
 class AutoGenRunner(WorkflowRunner):
@@ -69,15 +62,7 @@ class AutoGenRunner(WorkflowRunner):
             model=context.model,
             semaphore=context.llm_semaphore,
             temperature=context.temperature,
-        )
-
-        # Selector uses same client (its calls are tracked separately)
-        selector_client = InstrumentedModelClient(
-            streaming_client=context.streaming_client,
-            http_client=context.http_client,
-            model=context.model,
-            semaphore=context.llm_semaphore,
-            temperature=context.temperature,
+            max_model_len=context.max_model_len,
         )
 
         # Create agents
@@ -107,56 +92,55 @@ class AutoGenRunner(WorkflowRunner):
             model_client=agent_client,
             system_message=(
                 "You are the Aggregator agent. Combine the Planner's plan and "
-                "all Executors' outputs into one final, coherent answer. "
-                "End your response with TERMINATE."
+                "all Executors' outputs into one final, coherent answer."
             ),
         )
 
-        # Termination: stop when Aggregator says TERMINATE or max messages reached
-        # Expected flow: 1 (Planner) + N (Executors) + 1 (Aggregator) + margin
-        max_msgs = 2 + context.executors + 5  # some margin for selector flexibility
-        termination = (
-            TextMentionTermination("TERMINATE")
-            | MaxMessageTermination(max_messages=max_msgs)
-        )
+        # Orchestrate: P → E0 → E1 → ... → A
+        # Each agent receives the conversation history via on_messages()
+        conversation: List[TextMessage] = []
+        agent_order = [planner] + executors + [aggregator]
+        turn_order: List[str] = []
 
-        # Build SelectorGroupChat
-        participants = [planner] + executors + [aggregator]
-        team = SelectorGroupChat(
-            participants=participants,
-            model_client=selector_client,
-            termination_condition=termination,
-            selector_prompt=_SELECTOR_PROMPT,
-            allow_repeated_speaker=False,
-        )
+        # Initial user message
+        user_msg = TextMessage(content=prompt, source="user")
+        conversation.append(user_msg)
 
-        # Run the team
-        result = await team.run(task=prompt)
+        for agent in agent_order:
+            # Count metrics before this call
+            n_before = len(agent_client._call_records)
+
+            # Send conversation to agent
+            response = await agent.on_messages(conversation, cancellation_token=None)
+
+            # Extract the agent's response
+            if response.chat_message is not None:
+                conversation.append(response.chat_message)
+
+            turn_order.append(agent.name)
 
         task_end = time.time()
 
-        # Collect agent metrics (excludes selector overhead)
+        # Collect all metrics
         agent_metrics = agent_client.pop_metrics()
-        selector_metrics = selector_client.pop_metrics()
 
-        # Build step records from the agent call metrics
-        # Each agent LLM call maps to a step in execution order
+        # Build step records
         steps: Dict[str, StepRecord] = {}
-        turn_order: List[str] = []
         prev_step_id = None
+        _name_counts: Dict[str, int] = {}
 
         for i, m in enumerate(agent_metrics):
-            # Determine agent role from call order
-            # AutoGen calls agents in the order selected by the selector
-            step_id = self._infer_step_id(i, len(agent_metrics), context.executors)
-            agent_role = self._role_from_step_id(step_id)
-            turn_order.append(step_id)
+            if i < len(turn_order):
+                speaker = turn_order[i]
+                step_id = self._speaker_to_step_id(speaker, _name_counts)
+                agent_role = self._role_from_speaker(speaker)
+            else:
+                step_id = f"X{i}"
+                agent_role = "unknown"
 
-            # Dependencies: each step depends on the previous (sequential in SelectorGroupChat)
             deps = [prev_step_id] if prev_step_id else []
 
-            # Compute bytes
-            bytes_in = int((m.prompt_tokens or 0) * 4)  # rough estimate
+            bytes_in = int((m.prompt_tokens or 0) * 4)
             bytes_out = len(m.out_text.encode("utf-8"))
 
             ready_ts = m.start_ts
@@ -183,13 +167,13 @@ class AutoGenRunner(WorkflowRunner):
                 bytes_out=bytes_out,
                 ok=m.ok,
                 error=m.error,
+                # v2: monotonic ns timestamps
+                start_ns=m.start_ns,
+                first_token_ns=m.first_token_ns,
+                end_ns=m.end_ns,
+                status="error" if not m.ok else "ok",
             )
             prev_step_id = step_id
-
-        # Selector overhead
-        selector_overhead_ms = sum(
-            (m.end_ts - m.start_ts) * 1000 for m in selector_metrics
-        )
 
         makespan_ms = (task_end - task_start) * 1000
         messages_count = len(agent_metrics)
@@ -201,9 +185,22 @@ class AutoGenRunner(WorkflowRunner):
         deps_map = {sid: r.deps for sid, r in steps.items()}
         cp_ms = critical_path_dag_ms(step_durations, deps_map) if steps else 0.0
 
-        # Cleanup
         await agent_client.close()
-        await selector_client.close()
+
+        # v2: compute DAG metrics and role token stats
+        steps_raw = {
+            sid: {
+                "deps": r.deps,
+                "agent_role": r.agent_role,
+                "prompt_tokens": r.prompt_tokens,
+                "completion_tokens": r.completion_tokens,
+            }
+            for sid, r in steps.items()
+        }
+        dag_raw = compute_dag_metrics(steps_raw)
+        dag_metrics = DagMetrics(**dag_raw)
+        role_stats_raw = compute_role_token_stats(steps_raw)
+        role_token_stats = [RoleTokenStats(**rs) for rs in role_stats_raw]
 
         return TaskRecord(
             task_id=task_id,
@@ -217,34 +214,41 @@ class AutoGenRunner(WorkflowRunner):
             critical_path_ms=cp_ms,
             total_idle_wait_ms=total_idle_wait_ms,
             framework="autogen",
-            selector_overhead_ms=selector_overhead_ms,
-            turn_order=turn_order,
+            selector_overhead_ms=0.0,
+            turn_order=list(steps.keys()),
+            schema_version=2,
+            dag_metrics=dag_metrics,
+            role_token_stats=role_token_stats,
         )
 
     @staticmethod
-    def _infer_step_id(call_idx: int, total_calls: int, executors: int) -> str:
-        """
-        Map sequential call index to step ID.
-        Expected order: P, E0, E1, ..., A
-        If more calls than expected, append suffix.
-        """
-        if call_idx == 0:
-            return "P"
-        elif call_idx <= executors:
-            return f"E{call_idx - 1}"
-        elif call_idx == executors + 1:
-            return "A"
+    def _speaker_to_step_id(speaker: str, counts: Dict[str, int]) -> str:
+        """Map actual AutoGen speaker name to a short step ID."""
+        n = counts.get(speaker, 0)
+        counts[speaker] = n + 1
+
+        lower = speaker.lower()
+        if "planner" in lower:
+            return "P" if n == 0 else f"P#{n}"
+        elif "executor" in lower:
+            m = re.search(r"(\d+)", speaker)
+            idx = m.group(1) if m else "0"
+            base = f"E{idx}"
+            return base if n == 0 else f"{base}#{n}"
+        elif "aggregator" in lower:
+            return "A" if n == 0 else f"A#{n}"
         else:
-            # Extra calls beyond expected pattern
-            return f"X{call_idx}"
+            return f"{speaker[:3].upper()}#{n}" if n > 0 else speaker[:3].upper()
 
     @staticmethod
-    def _role_from_step_id(step_id: str) -> str:
-        if step_id == "P":
+    def _role_from_speaker(speaker: str) -> str:
+        """Map actual AutoGen agent name to a role label."""
+        lower = speaker.lower()
+        if "planner" in lower:
             return "planner"
-        elif step_id.startswith("E"):
+        elif "executor" in lower:
             return "executor"
-        elif step_id == "A":
+        elif "aggregator" in lower:
             return "aggregator"
         else:
             return "unknown"

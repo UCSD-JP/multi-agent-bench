@@ -17,6 +17,10 @@ class LLMCallMetrics:
     total_tokens: Optional[int]
     out_text: str
     error: Optional[str] = None
+    # v2: monotonic nanosecond timestamps (no clock skew for deltas)
+    start_ns: Optional[int] = None
+    first_token_ns: Optional[int] = None
+    end_ns: Optional[int] = None
 
 
 @dataclass
@@ -45,6 +49,34 @@ class StepRecord:
     bytes_out: int = 0
     ok: bool = True
     error: Optional[str] = None
+    # v2: monotonic nanosecond timestamps + status
+    start_ns: Optional[int] = None
+    first_token_ns: Optional[int] = None
+    end_ns: Optional[int] = None
+    status: str = "ok"
+
+
+@dataclass
+class DagMetrics:
+    """DAG topology metrics computed from step dependency graph."""
+    depth: int = 0
+    max_width: int = 0
+    fanout_max: int = 0
+    fanin_max: int = 0
+    critical_path_steps: List[str] = field(default_factory=list)
+    critical_path_len: int = 0
+    parallel_fraction: float = 0.0
+
+
+@dataclass
+class RoleTokenStats:
+    """Per-role aggregate token statistics."""
+    role: str
+    count: int = 0
+    prompt_mean: float = 0.0
+    prompt_std: float = 0.0
+    output_mean: float = 0.0
+    output_std: float = 0.0
 
 
 @dataclass
@@ -62,3 +94,7 @@ class TaskRecord:
     framework: str = "raw"
     selector_overhead_ms: float = 0.0
     turn_order: List[str] = field(default_factory=list)
+    # v2 fields
+    schema_version: int = 2
+    dag_metrics: Optional[DagMetrics] = None
+    role_token_stats: List[RoleTokenStats] = field(default_factory=list)

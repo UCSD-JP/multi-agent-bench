@@ -2,9 +2,42 @@
 
 import json
 import os
+from dataclasses import asdict
 from typing import List
 
-from .types import TaskRecord
+from .types import StepRecord, TaskRecord
+
+
+def _step_to_dict(s: StepRecord) -> dict:
+    """Serialize a StepRecord to dict, including v2 fields when present."""
+    d = {
+        "agent_role": s.agent_role,
+        "deps": s.deps,
+        "ready_ts": s.ready_ts,
+        "start_ts": s.start_ts,
+        "end_ts": s.end_ts,
+        "wait_ms": s.wait_ms,
+        "latency_ms": s.latency_ms,
+        "ttft_ms": s.ttft_ms,
+        "tpot_ms": s.tpot_ms,
+        "prompt_tokens": s.prompt_tokens,
+        "completion_tokens": s.completion_tokens,
+        "total_tokens": s.total_tokens,
+        "bytes_in": s.bytes_in,
+        "bytes_out": s.bytes_out,
+        "ok": s.ok,
+        "error": s.error,
+    }
+    # v2 fields — only serialize when set
+    if s.start_ns is not None:
+        d["start_ns"] = s.start_ns
+    if s.first_token_ns is not None:
+        d["first_token_ns"] = s.first_token_ns
+    if s.end_ns is not None:
+        d["end_ns"] = s.end_ns
+    if s.status != "ok":
+        d["status"] = s.status
+    return d
 
 
 def write_trace_jsonl(records: List[TaskRecord], output_dir: str, suffix: str = "") -> str:
@@ -27,24 +60,7 @@ def write_trace_jsonl(records: List[TaskRecord], output_dir: str, suffix: str = 
                 "total_idle_wait_ms": tr.total_idle_wait_ms,
                 "framework": tr.framework,
                 "steps": {
-                    sid: {
-                        "agent_role": s.agent_role,
-                        "deps": s.deps,
-                        "ready_ts": s.ready_ts,
-                        "start_ts": s.start_ts,
-                        "end_ts": s.end_ts,
-                        "wait_ms": s.wait_ms,
-                        "latency_ms": s.latency_ms,
-                        "ttft_ms": s.ttft_ms,
-                        "tpot_ms": s.tpot_ms,
-                        "prompt_tokens": s.prompt_tokens,
-                        "completion_tokens": s.completion_tokens,
-                        "total_tokens": s.total_tokens,
-                        "bytes_in": s.bytes_in,
-                        "bytes_out": s.bytes_out,
-                        "ok": s.ok,
-                        "error": s.error,
-                    }
+                    sid: _step_to_dict(s)
                     for sid, s in tr.steps.items()
                 },
             }
@@ -53,6 +69,13 @@ def write_trace_jsonl(records: List[TaskRecord], output_dir: str, suffix: str = 
                 row["selector_overhead_ms"] = tr.selector_overhead_ms
             if tr.turn_order:
                 row["turn_order"] = tr.turn_order
+            # v2 fields
+            if tr.schema_version >= 2:
+                row["schema_version"] = tr.schema_version
+            if tr.dag_metrics is not None:
+                row["dag_metrics"] = asdict(tr.dag_metrics)
+            if tr.role_token_stats:
+                row["role_token_stats"] = [asdict(rs) for rs in tr.role_token_stats]
             f.write(json.dumps(row) + "\n")
 
     return out_path

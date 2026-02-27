@@ -21,30 +21,21 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
+from benchmark.core.dag_metrics import compute_dag_metrics, compute_role_token_stats
 from benchmark.core.metrics import critical_path_dag_ms
 from benchmark.core.prompts import PromptBuilder
-from benchmark.core.types import LLMCallMetrics, StepRecord, TaskRecord
+from benchmark.core.types import (
+    DagMetrics,
+    LLMCallMetrics,
+    RoleTokenStats,
+    StepRecord,
+    TaskRecord,
+)
 from benchmark.runners.base import RunContext, WorkflowRunner
 
-try:
-    from a2a.server.request_handlers import RequestHandler
-    from a2a.server.request_handlers.request_handler_params import MessageSendParams
-    from a2a.types import (
-        Artifact,
-        Message,
-        MessageSendConfiguration,
-        Part,
-        Task as A2ATask,
-        TaskArtifactUpdateEvent,
-        TaskState,
-        TaskStatus,
-        TaskStatusUpdateEvent,
-        TextPart,
-    )
-
-    _A2A_AVAILABLE = True
-except ImportError:
-    _A2A_AVAILABLE = False
+# A2A protocol is simulated in-process (no external SDK required).
+# The runner constructs A2A-style JSON-RPC messages as dicts to model
+# protocol overhead without requiring the actual a2a-sdk package.
 
 
 class A2ARunner(WorkflowRunner):
@@ -59,12 +50,6 @@ class A2ARunner(WorkflowRunner):
         prompt: str,
         context: RunContext,
     ) -> TaskRecord:
-        if not _A2A_AVAILABLE:
-            raise ImportError(
-                "Google A2A SDK is not installed. "
-                "Install with: pip install -r requirements-a2a.txt"
-            )
-
         task_start = time.time()
 
         # Step 1: Planner
@@ -130,6 +115,21 @@ class A2ARunner(WorkflowRunner):
         deps_map = {sid: r.deps for sid, r in steps.items()}
         cp_ms = critical_path_dag_ms(step_durations, deps_map) if steps else 0.0
 
+        # v2: compute DAG metrics and role token stats
+        steps_raw = {
+            sid: {
+                "deps": r.deps,
+                "agent_role": r.agent_role,
+                "prompt_tokens": r.prompt_tokens,
+                "completion_tokens": r.completion_tokens,
+            }
+            for sid, r in steps.items()
+        }
+        dag_raw = compute_dag_metrics(steps_raw)
+        dag_metrics = DagMetrics(**dag_raw)
+        role_stats_raw = compute_role_token_stats(steps_raw)
+        role_token_stats = [RoleTokenStats(**rs) for rs in role_stats_raw]
+
         return TaskRecord(
             task_id=task_id,
             task_start_ts=task_start,
@@ -142,6 +142,9 @@ class A2ARunner(WorkflowRunner):
             critical_path_ms=cp_ms,
             total_idle_wait_ms=total_idle_wait_ms,
             framework="a2a",
+            schema_version=2,
+            dag_metrics=dag_metrics,
+            role_token_stats=role_token_stats,
         )
 
     async def _run_agent_step(
@@ -202,6 +205,7 @@ class A2ARunner(WorkflowRunner):
                 model=context.model,
                 messages=messages,
                 temperature=context.temperature,
+                max_model_len=context.max_model_len,
             )
             end_ts = call.end_ts
 
@@ -232,6 +236,11 @@ class A2ARunner(WorkflowRunner):
             "bytes_out": bytes_out,
             "ok": call.ok,
             "error": call.error,
+            # v2: monotonic ns timestamps
+            "start_ns": call.start_ns,
+            "first_token_ns": call.first_token_ns,
+            "end_ns": call.end_ns,
+            "status": "error" if not call.ok else "ok",
         }
 
         return {

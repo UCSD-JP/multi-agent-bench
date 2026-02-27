@@ -20,17 +20,21 @@ Example:
 """
 
 import asyncio
+import json
 import os
 import random
 import statistics
 import time
 import argparse
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
 from benchmark.core.dataset import get_prompt_from_dataset, load_sharegpt_dataset
 from benchmark.core.metrics import percentile
+from benchmark.core.server_metrics import (
+    compute_delta, print_server_metrics, save_server_metrics, scrape_metrics,
+)
 from benchmark.core.streaming_client import OpenAIStreamingClient
 from benchmark.core.trace_writer import write_trace_jsonl
 from benchmark.core.types import TaskRecord
@@ -117,11 +121,15 @@ async def main():
                     help="Number of tasks (dataset prompts)")
     ap.add_argument("--concurrency", type=int, default=32,
                     help="LLM call concurrency (global)")
+    ap.add_argument("--task_concurrency", type=int, default=0,
+                    help="Max concurrent tasks (0 = same as concurrency)")
     ap.add_argument("--executors", type=int, default=2,
                     help="How many executor agents")
     ap.add_argument("--output_dir", type=str, default="results_multiagent")
     ap.add_argument("--base_url", type=str, default="http://localhost:8000/v1")
     ap.add_argument("--api_key", type=str, default="vllm-key")
+    ap.add_argument("--max_model_len", type=int, default=4096,
+                    help="Server max_model_len for token clamping (default: 4096)")
     args = ap.parse_args()
 
     if not os.path.exists(args.dataset_path):
@@ -152,6 +160,7 @@ async def main():
             llm_semaphore=asyncio.Semaphore(1),  # warmup: serial
             streaming_client=llm,
             executors=args.executors,
+            max_model_len=args.max_model_len,
         )
 
         print(f"[warmup] running 1 task (dataset-only)")
@@ -167,26 +176,55 @@ async def main():
             llm_semaphore=llm_semaphore,
             streaming_client=llm,
             executors=args.executors,
+            max_model_len=args.max_model_len,
         )
 
+        # Task-level concurrency: limit how many teams run simultaneously
+        # to avoid semaphore deadlocks (each team needs multiple LLM calls)
+        task_conc = args.task_concurrency or args.concurrency
+        task_sem = asyncio.Semaphore(task_conc)
+
         print(f"[run] framework={runner.name}  tasks={args.tasks}  "
-              f"llm_concurrency={args.concurrency}  executors={args.executors}")
+              f"llm_concurrency={args.concurrency}  task_concurrency={task_conc}  "
+              f"executors={args.executors}")
+
+        # Scrape server metrics BEFORE benchmark
+        skip_metrics = os.environ.get("SKIP_SERVER_METRICS", "0") == "1"
+        metrics_before = None
+        if not skip_metrics:
+            metrics_before = await scrape_metrics(args.base_url, http_client)
+            if metrics_before:
+                print(f"[metrics] Server metrics baseline captured")
+
         t0 = time.time()
+
+        async def run_with_limit(tid: int, prompt: str) -> TaskRecord:
+            async with task_sem:
+                return await runner.run_task(task_id=tid, prompt=prompt, context=ctx)
 
         task_futs = []
         for i in range(args.tasks):
             prompt = get_prompt_from_dataset(dataset, i)
-            task_futs.append(
-                asyncio.create_task(
-                    runner.run_task(task_id=i, prompt=prompt, context=ctx)
-                )
-            )
+            task_futs.append(asyncio.create_task(run_with_limit(i, prompt)))
 
         records: List[TaskRecord] = await asyncio.gather(*task_futs)
         t1 = time.time()
 
+        # Scrape server metrics AFTER benchmark
+        metrics_after = None
+        if not skip_metrics:
+            metrics_after = await scrape_metrics(args.base_url, http_client)
+
     total_s = t1 - t0
     print_summary(records, total_s)
+
+    # Server-side metrics delta
+    if metrics_before and metrics_after:
+        delta = compute_delta(metrics_before, metrics_after)
+        print_server_metrics(delta)
+        suffix_metrics = f"_{runner.name}_c{args.concurrency}"
+        metrics_path = save_server_metrics(delta, args.output_dir, suffix=suffix_metrics)
+        print(f"Saved server metrics to: {metrics_path}")
 
     # Write trace JSONL
     suffix = f"_{runner.name}"

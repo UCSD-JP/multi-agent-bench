@@ -90,12 +90,14 @@ if _AUTOGEN_AVAILABLE:
             model: str,
             semaphore: asyncio.Semaphore,
             temperature: float = 0.2,
+            max_model_len: int = 4096,
         ):
             self._streaming_client = streaming_client
             self._http_client = http_client
             self._model = model
             self._semaphore = semaphore
             self._temperature = temperature
+            self._max_model_len = max_model_len
             self._call_records: List[LLMCallMetrics] = []
             self._total_usage = RequestUsage(prompt_tokens=0, completion_tokens=0)
             self._actual_usage = RequestUsage(prompt_tokens=0, completion_tokens=0)
@@ -118,6 +120,7 @@ if _AUTOGEN_AVAILABLE:
                     model=self._model,
                     messages=openai_messages,
                     temperature=self._temperature,
+                    max_model_len=self._max_model_len,
                 )
 
             self._call_records.append(metrics)
@@ -142,7 +145,7 @@ if _AUTOGEN_AVAILABLE:
             )
 
             return CreateResult(
-                finish_reason="stop" if metrics.ok else "error",
+                finish_reason="stop" if metrics.ok else "unknown",
                 content=metrics.out_text or "",
                 usage=usage,
                 cached=False,
@@ -198,7 +201,7 @@ if _AUTOGEN_AVAILABLE:
             *,
             tools: Sequence[Any] = [],
         ) -> int:
-            return 8192 - self.count_tokens(messages, tools=tools)
+            return self._max_model_len - self.count_tokens(messages, tools=tools)
 
         @property
         def capabilities(self) -> ModelCapabilities:

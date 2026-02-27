@@ -49,9 +49,9 @@ def generate_random_text(num_chars: int) -> str:
 def build_system_prompt(target_tokens: int) -> str:
     """Build a system prompt of approximately target_tokens tokens.
 
-    Rule of thumb: 1 token ~ 4 chars for English text.
+    Random lowercase words tokenize at ~2 chars/token (verified with Qwen3 tokenizer).
     """
-    target_chars = target_tokens * 4
+    target_chars = target_tokens * 2
     base = (
         "You are an expert software engineering assistant. "
         "You help with code review, debugging, refactoring, and implementation tasks. "
@@ -67,7 +67,7 @@ def build_turn_message(turn_idx: int, context_growth_tokens: int) -> str:
 
     Each turn adds ~context_growth_tokens of new context (tool output, file content).
     """
-    target_chars = context_growth_tokens * 4
+    target_chars = context_growth_tokens * 2
     base = f"## Turn {turn_idx + 1}\n"
     base += f"Here is the latest file content and tool output:\n\n```\n"
     filler = generate_random_text(max(0, target_chars - len(base) - 10))

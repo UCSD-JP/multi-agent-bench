@@ -15,7 +15,7 @@ export TORCHINDUCTOR_CACHE_DIR="/mnt/raid0_ssd/jinpyo/.cache/torch"
 # --- Model ---
 export MODEL="${MODEL:-Qwen/Qwen3-Next-80B-A3B-Instruct}"
 export TP_SIZE="${TP_SIZE:-2}"
-export MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
+export MAX_MODEL_LEN="${MAX_MODEL_LEN:-16384}"
 export MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
 export GPU_UTIL="${GPU_UTIL:-0.90}"
 

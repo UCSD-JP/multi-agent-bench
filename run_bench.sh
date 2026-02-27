@@ -32,5 +32,6 @@ python3 "${SCRIPT_DIR}/benchmark_agentic.py" \
   --api_key "${OPENAI_API_KEY}" \
   --tasks "${BENCH_TASKS}" \
   --concurrency "${BENCH_CONCURRENCY}" \
+  --task_concurrency "${BENCH_TASK_CONCURRENCY}" \
   --executors "${BENCH_EXECUTORS}" \
   --output_dir "${BENCH_OUTPUT_DIR}"

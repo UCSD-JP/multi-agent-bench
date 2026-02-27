@@ -22,6 +22,7 @@ class RunContext:
     streaming_client: OpenAIStreamingClient
     executors: int = 2
     temperature: float = 0.2
+    max_model_len: int = 4096
 
 
 class WorkflowRunner(ABC):
