@@ -1,0 +1,20 @@
+{
+  "duration_s": 54.89863038063049,
+  "ttft_mean_ms": 166.19042042763002,
+  "ttft_count": 248,
+  "ttft_p50_ms": 175.0,
+  "ttft_p95_ms": 317.64705882352933,
+  "ttft_p99_ms": 463.529411764706,
+  "tpot_mean_ms": 18.496519610499877,
+  "tpot_count": 63382,
+  "tpot_p50_ms": 17.487060089419884,
+  "tpot_p95_ms": 81.34028605482715,
+  "tpot_p99_ms": 96.4492252681764,
+  "e2e_mean_ms": 4892.975354386915,
+  "e2e_count": 248,
+  "generation_tokens_delta": 63630.0,
+  "prompt_tokens_delta": 135574.0,
+  "gen_tps": 1159.045308759654,
+  "prompt_tps": 2469.5333756055534,
+  "peak_kv_cache_usage": 0.0
+}

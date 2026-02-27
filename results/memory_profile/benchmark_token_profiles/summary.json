@@ -1,0 +1,26 @@
+[
+  {
+    "benchmark": "LiveCodeBench",
+    "n_tasks": 1055,
+    "input_min": 136,
+    "input_p25": 336,
+    "input_median": 451,
+    "input_mean": 482,
+    "input_p75": 584,
+    "input_p95": 849,
+    "input_max": 1543,
+    "output_est": "200-800 (code)"
+  },
+  {
+    "benchmark": "SWE-bench Verified",
+    "n_tasks": 500,
+    "input_min": 24,
+    "input_p25": 163,
+    "input_median": 294,
+    "input_mean": 447,
+    "input_p75": 539,
+    "input_p95": 1266,
+    "input_max": 6939,
+    "output_est": "220 median patch"
+  }
+]

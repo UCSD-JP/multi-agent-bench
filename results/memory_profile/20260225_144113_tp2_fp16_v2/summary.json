@@ -1,0 +1,29 @@
+{
+  "total_requests": 48,
+  "ok_requests": 48,
+  "error_requests": 0,
+  "gpu_samples": 318,
+  "by_concurrency": {
+    "8": {
+      "n_requests": 12,
+      "n_ok": 12,
+      "avg_completion_tokens": 96.0
+    },
+    "16": {
+      "n_requests": 12,
+      "n_ok": 12,
+      "avg_completion_tokens": 96.0
+    },
+    "32": {
+      "n_requests": 12,
+      "n_ok": 12,
+      "avg_completion_tokens": 96.0
+    },
+    "64": {
+      "n_requests": 12,
+      "n_ok": 12,
+      "avg_completion_tokens": 96.0
+    }
+  },
+  "errors": []
+}
